@@ -1,0 +1,44 @@
+%YAML 1.2
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+################################################################################
+
+---
+name: riva_server
+detail:
+  server_uri: "localhost:50051"
+
+---
+name: riva_model
+detail:
+  model_name: riva-asr
+
+---
+name: riva_asr_stream
+detail:
+  encoding: LINEAR_PCM
+  sample_rate_hertz: 16000
+  language_code: en-US
+  max_alternatives: 1
+  # Enables punctuation if punctuator_model is installed, otherwise keep false.
+  enable_automatic_punctuation: true
+  max_idle_microseconds: 60000000
+
+---
+name: ds_riva_asr_plugin
+detail:
+  final_only: false
+  enable_text_pts: true
+  # Select PTS calculation scheme:
+  #   false - use PTS of latest audio input buffer
+  #   true - use PTS and duration derived from Riva WordInfo start_time and end_time
+  use_riva_pts: false
+  force_final_trailing: false

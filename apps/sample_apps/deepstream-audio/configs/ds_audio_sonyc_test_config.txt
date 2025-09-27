@@ -1,0 +1,62 @@
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+################################################################################
+
+[application]
+enable-perf-measurement=1
+perf-measurement-interval-sec=5
+
+[source0]
+enable=1
+#Type - 2=URI
+type=6
+uri=../../../../../samples/streams/sonyc_mixed_audio.wav
+num-sources=1
+gpu-id=0
+
+[source1]
+enable=1
+#Type - 2=URI
+type=6
+uri=../../../../../samples/streams/sonyc_mixed_audio.wav
+num-sources=1
+gpu-id=0
+
+[streammux]
+batch-size=2
+
+[sink0]
+enable=1
+#Type - 1=FakeSink
+type=1
+sync=1
+source-id=0
+gpu-id=0
+nvbuf-memory-type=0
+
+[audio-classifier]
+enable=1
+gpu-id=0
+model-engine-file=../../../../../samples/models/SONYC_Audio_Classifier/sonyc_audio_classify.onnx_b2_gpu0_fp32.engine
+#property
+batch-size=2
+nvbuf-memory-type=0
+audio-transform=melsdb,fft_length=2560,hop_size=692,dsp_window=hann,num_mels=128,sample_rate=44100,p2db_ref=(float)1.0,p2db_min_power=(float)0.0,p2db_top_db=(float)80.0
+# Specify the desired input audio rate to nvinferaudio
+# input source(s) shall be audio resampled to this rate
+# Here, using 44.1kHz
+audio-input-rate=44100
+audio-framesize=441000
+audio-hopsize=110250
+config-file=config_infer_audio_sonyc.txt
+
+[tests]
+file-loop=1

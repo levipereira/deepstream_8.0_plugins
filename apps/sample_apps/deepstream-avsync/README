@@ -1,0 +1,248 @@
+*****************************************************************************
+* Copyright (c) 2021-2025 NVIDIA Corporation.  All rights reserved.
+*
+* NVIDIA Corporation and its licensors retain all intellectual property
+* and proprietary rights in and to this software, related documentation
+* and any modifications thereto.  Any use, reproduction, disclosure or
+* distribution of this software and related documentation without an express
+* license agreement from NVIDIA Corporation is strictly prohibited.
+*****************************************************************************
+
+*****************************************************************************
+                     deepstream-avsync-app
+                             README
+*****************************************************************************
+
+===============================================================================
+1. Prerequisites:
+===============================================================================
+
+A. Please follow instructions in the apps/sample_apps/deepstream-app/README on how
+   to install the prerequisites for the Deepstream SDK, the DeepStream SDK itself,
+   and the apps.
+
+   You must have the following development packages installed
+   GStreamer-1.0
+   GStreamer-1.0 Base Plugins
+   GStreamer-1.0 gstrtspserver
+   X11 client-side library
+
+   To install these packages, execute the following command:
+   sudo apt-get install libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+   libgstrtspserver-1.0-dev libx11-dev
+
+B. The application runs with nvdsasr plugin for Automatic speech recognition.
+   To run with nvdsasr, make sure ASR model repository is already generated.
+       If not generated, follow below steps:
+       (Note: This application works with Riva Speech Skills 1.5.0-beta release only)
+   a. Prerequisites:
+      Refer https://docs.nvidia.com/deeplearning/riva/user-guide/docs/quick-start-guide.html#prerequisites for details.
+
+   b. Model repo setup:
+      Follow below commands to set up models :
+      $ngc registry resource download-version nvidia/riva/riva_quickstart:1.5.0-beta
+      $cd riva_quickstart_v1.5.0-beta
+
+      Update config.sh file with below data:
+      service_enabled_asr=true
+      service_enabled_nlp=false
+      service_enabled_tts=false
+
+      riva_model_loc="riva-asr-model-repo"
+
+      models_asr=(
+      "${riva_ngc_org}/${riva_ngc_team}/rmir_asr_citrinet_1024_asrset1p7_streaming:${riva_ngc_model_version}"
+      "${riva_ngc_org}/${riva_ngc_team}/rmir_nlp_punctuation_bert_base:${riva_ngc_model_version}"
+      )
+
+      #Run the riva_init.sh script
+      $sudo bash riva_init.sh
+
+      #Download Japser Models
+      #Download jasper_asr_SET_1pt2_nr.riva file
+      $wget https://api.ngc.nvidia.com/v2/models/nvidia/tao/speechtotext_english_jasper/versions/deployable_v1.2/files/jasper_asr_SET_1pt2_nr.riva
+
+      #Now we have to copy the jasper_asr_SET_1pt2_nr.riva file to /var/lib/docker/volumes/riva-asr-model-repo/_data/
+      #This needs root privilege. Use sudo su command
+      $sudo su
+      $cp <directory path of downloaded .riva file>/jasper_asr_SET_1pt2_nr.riva  /var/lib/docker/volumes/riva-asr-model-repo/_data/
+      $exit
+
+      #Make sure we are at riva_quickstart_v1.5.0-beta directory
+
+      # Set below environment variables:
+      $export RIVA_SM_CONTAINER="nvcr.io/nvidia/riva/riva-speech:1.5.0-beta-servicemaker"
+      $export MODEL_LOC="riva-asr-model-repo"
+      $export MODEL_NAME="jasper_asr_SET_1pt2_nr.riva"
+      $export KEY="tlt_encode"
+
+      # Download the docker image:
+      $sudo docker pull $RIVA_SM_CONTAINER
+
+      # Build Riva ASR model in streaming mode:
+      $sudo docker run --rm --gpus 0 -v $MODEL_LOC:/data $RIVA_SM_CONTAINER riva-build speech_recognition /data/asr.rmir:$KEY /data/$MODEL_NAME:$KEY --decoder_type=greedy
+
+      # Deploy Riva model in streaming mode:
+      $sudo docker run --rm --gpus 0 -v $MODEL_LOC:/data $RIVA_SM_CONTAINER riva-deploy -f /data/asr.rmir:$KEY /data/models/
+
+      With above steps, Jasper models are downloaded at /var/lib/docker/volumes/riva-asr-model-repo/_data/models/
+
+   c. gRPC installation and prerequisites:
+      # Use gRPC_installation.sh to install gRPC
+      $sudo chmod +x gRPC_installation.sh
+      $./gRPC_installation.sh
+      $source ~/.profile
+
+
+   d. Launch gRPC service before running deepstream-avsync-app:
+
+      #Make sure below steps are followed  after section 1.B.c i.e. "gRPC installation and prerequisites" are completed.
+      #Go to riva_quickstart_v1.5.0-beta directory
+      $cd riva_quickstart_v1.5.0-beta
+
+      #Run ASR service
+      $sudo bash riva_start.sh
+
+      # If the user wants to stop ASR services after the application has run successfully, run the following command.
+      $sudo bash riva_stop.sh
+
+   e. Set up environment to use gRPC libs
+      (i)  Testing application on x86:
+
+           Follow steps mentioned in section 1.B.d i.e. "Launch gRPC service before running deepstream-avsync-app" to launch ASR service.
+
+           # Set LD_LIBRARY_PATH
+           $source ~/.profile
+
+           To run deepstream-avsync-app, follow steps mentioned in section 4 i.e. "Usage".
+      (ii) Testing application inside docker:
+
+           Note: This needs GPU memory more than 8GB.
+
+           Outside docker, follow section 1.B.d "Launch gRPC service before running deepstream-avsync-app" to launch ASR service.
+           Once ASR service is running we need to run the docker.
+           $export DISPLAY=:0
+           $xhost +
+
+           $sudo docker run --rm -it --gpus '"'device=0'"' -v riva-asr-model-repo:/data -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix --net=host $DS_Docker
+           where $DS_Docker is the name of DeepStream docker image.
+
+           # Set LD_LIBRARY_PATH
+           $source ~/.profile
+
+           To run deepstream-avsync-app, follow steps mentioned in section 4 i.e. "Usage".
+
+C. sudo apt install gstreamer1.0-libav gstreamer1.0-plugins-good
+
+===============================================================================
+2. Purpose:
+===============================================================================
+
+This document describes the sample deepstream-avsync application.
+
+This sample builds on top of the deepstream-test3 sample to demonstrate how to:
+
+* Use a uridecodebin3 so that any type of input (e.g. RTSP/File), any GStreamer
+  supported container format, and any codec can be used as input.
+* Process multiple Audio and video sources in the pipeline.
+* For video pipeline, for batch processing, configure the stream-muxer to generate a batch of frames.
+  Attach appropriate timestamp to outgoing gst buffer.
+* Decode audio data from individual sources and mix it using audio mixer element.
+* Send output of audio mixer and nvmultistreamtiler via rtsp or rtmp.
+* Perform automatic speech recognition on decoded audio data and overlay it's output on tiled video frame.
+
+===============================================================================
+3. To compile:
+===============================================================================
+
+  $ Set CUDA_VER in the MakeFile as per platform.
+      For x86, CUDA_VER=12.8
+  $ sudo make (sudo not required in case of docker containers)
+
+NOTE: To compile the sources, run make with "sudo" or root permission.
+
+===============================================================================
+4. Usage:
+===============================================================================
+
+  Follow steps 1.B.d and 1.B.e to launch ASR service and set LD_LIBRARY_PATH
+
+  $ ./deepstream-avsync-app <uri1> [uri2] ... [uriN] <flag to indicate to stream via RTSP or RTMP  1:RTSP  0:RTMP>
+      <RTMP server url :applicable only for RTMP, for RTSP specify port number> enc-type <0:Hardware encoder 1:Software encoder>
+e.g.
+  For RTSP output:
+  $ ./deepstream-avsync-app file:///home/ubuntu/video1.mp4 file:///home/ubuntu/video2.mp4 1 8554 enc-type 0
+  $ ./deepstream-avsync-app rtsp://127.0.0.1/video1 rtsp://127.0.0.1/video2 1 8554 enc-type 0
+  (For Platforms where hardware encoder is not present)
+  $ ./deepstream-avsync-app rtsp://127.0.0.1/video1 rtsp://127.0.0.1/video2 1 8554 enc-type 1
+
+  For RTMP output:
+  $ ./deepstream-avsync-app file:///home/ubuntu/video1.mp4 file:///home/ubuntu/video2.mp4 0 <Valid RTMP output url> enc-type 0
+  $ ./deepstream-avsync-app rtsp://127.0.0.1/video1 rtsp://127.0.0.1/video2 0 <Valid RTMP output url> enc-type 0
+  (For Platforms where hardware encoder is not present)
+  $ ./deepstream-avsync-app rtsp://127.0.0.1/video1 rtsp://127.0.0.1/video2 0 <Valid RTMP output url> enc-type 1
+
+  Note:
+  1. In case of RTMP input, make sure that the application is launched first and then rtmp input
+     streaming starts.
+  2. In case of RTMP output, make sure that RTMP output url is ready to accept streaming data.
+
+This sample accepts one or more containerised (eg. mp4/mkv)/RTMP/RTSP streams as input. It creates
+a source bin for each input and connects the decoded video output of bins to an instance of the
+"nvstreammux" element, which forms the batch of frames.
+It connects the decoded audio output to an instance "audiomixer" element to mix the audio from
+different input sources.
+Decoded audio output is also fed to nvdsasr plugin to perform automatic speech recognition.
+Text Output from nvdsasr plugin is overlayed on tiled video output using nvdsosd plugin.
+Output from audiomixer and nvmultistreamtiler can be sent over via RTSP server or RTMP server element.
+
+Synchronized audio and video output with text overlay on video can be seen remotely.
+* For RTSP output, use url: rtsp://localhost:8554/ds-test
+* For RTMP output, on youtube live, use url:rtmp://a.rtmp.youtube.com/live2/<stream key>
+
+  Note:
+  1. User needs to set the stream key in deepstream-avsync application.
+     This key can be obtained from youtube live.
+     Refer to https://support.google.com/youtube/answer/2907883#zippy=%2Cschedule-a-live-stream%2Cstart-live-streaming-now
+     for details on how to go live.
+  2. For demonstration purpose, the text is overlaid from left top corner of the frame.
+     User can choose to set the desired text location by modifying x_offset and
+     y_offset of text in nvosd_sink_pad_buffer_probe()
+  3. To disable text overlay set OSD_DISPLAY_TEXT to 0 in the application and compile it again.
+  4. Only x264enc has been validated for software encoder.
+  5. RTMP src is not a live source. So, need to add fakesrc with is-live=true.
+     Also connect it to audiomixer so that if data from one of the sources if not available,
+     it will not get stuck.
+  6. In case of rtmp input source, max-latency of 250msec is set on nvstreammux.
+     This has been set based on the observation that max latency required for buffers from
+     rtmpsrc to nvstreammux is 250msec. User can tune this value as per their requirement.
+     Same value is set in audio path on audiomixer for the same reason.
+  7. In case of file output, played using vlc player, sometimes av sync is not observed.
+     In that case try ffmpeg or gst-launch pipeline. This could be VLC player specific issue.
+  8. Make sure that audio stream has same encoded configuration. (e.g. sampling rate).
+     If these are different, audiomixer crashes.
+     To avoid the crash, user can add audioconvert and audioresample before audiomixer for a source.
+     This will ensure that all inputs to audiomixer have same format and sampling rate.
+  9. RTMP output on youtube live takes time to appear (~30-40seconds).
+     This could be because of youtube player buffering mechanism.
+  10. In case of RTMP output, before running the pipeline make sure that
+      youtube live page is refreshed and ready to accept incoming data.
+  11. Model repo setup requires ~7GB of GPU memory. Make sure the GPU memory is atleast 8GB.
+      To run the deepstream-avsync-app inside the docker the GPU memory larger than 8GB
+      must be used.
+  12. Different type of input streams while running the avsync app is not
+      supported i.e.  inputs cannot be a mixture of file ,rtsp and rtmp sources.
+      For ex- ./deepstream-avsync-app <file_in> <rtmp_in> 1 8554 is not valid,
+      since it has two different type of inputs.
+  13. In case of RTMP input, uridecodebin does not send EOS after stream is finished.
+      Because of this application stucks and does not exit. This seems to be an
+      issue with uridecodebin itself.
+  14. During runtime, ASR can be be disabled maximum upto max_sequence_idle_microseconds
+      value defined in each config.pbtxt inside riva-asr-ctc-decoder-cpu-streaming,
+      riva-asr-feature-extractor-streaming and riva-asr-voice-activity-detector-ctc-streaming directory
+      located at /data/models/ inside deepstream docker.
+      According to the use case, the user needs to tune this value.
+      Press key 'd'/'e' to disable or enable ASR at runtime.
+      For example: For a 5 minutes timeout set max_sequence_idle_microseconds=300000000.
+      (Default timeout is 1 minute)
+  15. This application works with Jasper models only.

@@ -1,0 +1,22 @@
+*****************************************************************************
+* Copyright (c) 2019-2023 NVIDIA Corporation.  All rights reserved.
+*
+* NVIDIA Corporation and its licensors retain all intellectual property
+* and proprietary rights in and to this software, related documentation
+* and any modifications thereto.  Any use, reproduction, disclosure or
+* distribution of this software and related documentation without an express
+* license agreement from NVIDIA Corporation is strictly prohibited.
+*****************************************************************************
+
+*****************************************************************************
+                     deepstream-segmentation-app
+                             README
+*****************************************************************************
+
+Already a similar application is available in the deepstream_tao_apps repository.
+Please refer to that. Link is given below:
+https://github.com/NVIDIA-AI-IOT/deepstream_tao_apps/tree/master/apps/tao_segmentation
+
+You may need to refer the generic README available below for steps on how to build
+and run the application.
+https://github.com/NVIDIA-AI-IOT/deepstream_tao_apps

@@ -1,0 +1,68 @@
+*****************************************************************************
+* Copyright (c) 2021-2025 NVIDIA Corporation.  All rights reserved.
+*
+* NVIDIA Corporation and its licensors retain all intellectual property
+* and proprietary rights in and to this software, related documentation
+* and any modifications thereto.  Any use, reproduction, disclosure or
+* distribution of this software and related documentation without an express
+* license agreement from NVIDIA Corporation is strictly prohibited.
+*****************************************************************************
+
+*****************************************************************************
+                              deepstream-audio
+                                 README
+*****************************************************************************
+
+===============================================================================
+1. Prerequisites:
+===============================================================================
+
+Follow these procedures to use the deepstream-audio application for native
+compilation.
+
+You must have the following development packages installed
+
+    GStreamer-1.0
+    GStreamer-1.0 Base Plugins
+    GStreamer-1.0 gstrtspserver
+    X11 client-side library
+
+1. To install these packages, execute the following command:
+   sudo apt-get install libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+   libgstrtspserver-1.0-dev libx11-dev libjson-glib-dev
+
+===============================================================================
+2. Purpose:
+===============================================================================
+
+The sample application demonstrates the audio inference using AI model.
+The onnx model "sonyc_audio_classify.onnx" is used as AI model.
+
+===============================================================================
+3. To compile:
+===============================================================================
+
+  $ Set CUDA_VER in the MakeFile as per platform.
+     For x86, CUDA_VER=12.8
+     For jetson, CUDA_VER=13.0
+  $ sudo make && sudo make install (sudo not required in case of docker
+containers)
+
+NOTE: To compile the sources, run make with "sudo" or root permission.
+
+===============================================================================
+4. Usage:
+===============================================================================
+
+   Run the application by executing the command:
+
+   $ deepstream-audio -c <config-file>
+   Example:
+   $ cd /opt/nvidia/deepstream/deepstream/sources/apps/sample_apps/deepstream-audio/configs/
+   $ deepstream-audio -c ds_audio_sonyc_test_config.txt
+
+Please refer "../../apps-common/includes/deepstream_config.h" to modify
+application parameters like maximum number of sources etc.
+
+NOTE: For more details, please refer to "DeepStream Reference Application -deepstream-audio-app"
+section from the DeepStream documentation.

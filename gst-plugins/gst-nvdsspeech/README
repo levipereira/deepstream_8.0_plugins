@@ -1,0 +1,71 @@
+################################################################################
+<<<<<<< HEAD   (2f7606 [service-maker]: YAML Config Update)
+# SPDX-FileCopyrightText: Copyright (c) 2020-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+=======
+# SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+>>>>>>> CHANGE (8d692f nvdsasr, nvdstexttospeech: Update to grpc v1.54.3)
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+################################################################################
+
+--------------------------------------------------------------------------------
+Description:
+DeepStream ASR speech plugin.
+This plugin can be used to perform Automatic Speech Recognition (ASR) using
+the NVIDIA Riva SDK. It uses a custom interface for developer to derive specific
+ASR processing functions. This mechanism is used to load custom ASR low level
+library at runtime. Included low level library implementation:
+1. libnvds_riva_asr_grpc.so: Uses gRPC API to communicate to the Riva ASR
+   service. This library can be selected by setting the customlib-name,
+   create-speech-ctx-func properties of the plugin.
+   customlib-name=libnvds_riva_asr_grpc.so
+   create-speech-ctx-func=create_riva_asr_grpc_ctx
+Refer to the DeepStream SDK documentation for the description of the plugin.
+https://docs.nvidia.com/metropolis/deepstream/dev-guide/text/DS_plugin_gst-nvdsasr.html
+
+--------------------------------------------------------------------------------
+Pre-requisites:
+- GStreamer-1.0 Development package
+- GStreamer-1.0 Base Plugins Development package
+- gRPC C++ shared library v1.54.3
+- NVIDIA Riva server deployed with desired ASR models
+
+Install GStreamer development packages using:
+   sudo apt-get install libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev
+
+Install gRPC C++ shared libraries (v1.54.3):
+   Please follow steps given at below link, and add -DBUILD_SHARED_LIBS=ON
+   to the cmake build options. (Recommend to use 'make -j4' instead of 'make -j'
+   while building)
+   https://grpc.io/docs/languages/cpp/quickstart/
+
+Deploy Riva ASR service
+   Need to install NVIDIA Riva SDK and deploy required ASR models.
+   To deploy the Riva server refer to
+   https://docs.nvidia.com/deeplearning/riva/user-guide/docs/quick-start-guide.html
+
+--------------------------------------------------------------------------------
+How to test DeepStream ASR Plugin:
+
+Start Riva ASR service.
+
+Configure parameters inside "ds_riva_asr_plugin" group
+available in the riva_asr_grpc_conf.yml file as below:
+   final_only: false
+   use_riva_pts: true
+   enable_text_pts: true
+
+Update the model name in the "riva_model" group as per the ASR model deployed using the Riva ASR service:
+   model_name: <ASR_Model>
+
+   $ gst-launch-1.0 -v -e uridecodebin \
+     uri=file:///opt/nvidia/deepstream/deepstream/sources/apps/audio_apps/deepstream_asr_app/streams/1272-135031-0000.wav ! audioresample ! \
+     nvdsasr customlib-name=/opt/nvidia/deepstream/deepstream/lib/libnvds_riva_asr_grpc.so create-speech-ctx-func=create_riva_asr_grpc_ctx config-file=/opt/nvidia/deepstream/deepstream/sources/apps/audio_apps/deepstream_asr_tts_app/riva_asr_grpc_conf.yml ! \
+     txt. videotestsrc pattern=black ! \
+     textoverlay name=txt shaded-background=yes ! autovideosink

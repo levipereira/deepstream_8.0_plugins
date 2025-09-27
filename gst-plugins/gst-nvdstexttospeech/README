@@ -1,0 +1,45 @@
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+################################################################################
+
+--------------------------------------------------------------------------------
+Description:
+DeepStream Text To Speech plugin
+Refer to the DeepStream SDK documentation for the description of the plugin.
+
+--------------------------------------------------------------------------------
+Pre-requisites:
+- GStreamer-1.0 Development package
+- GStreamer-1.0 Base Plugins Development package
+- gRPC C++ shared library v1.54.3
+- NVIDIA Riva server deployed with desired speech synthesis models
+
+Install GStreamer development packages using:
+   sudo apt-get install libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev
+
+Install gRPC C++ shared libraries (v1.54.3):
+   Please follow steps given at below link, and add -DBUILD_SHARED_LIBS=ON
+   to the cmake build options. (Recommend to use 'make -j4' instead of 'make -j'
+   while building)
+   https://grpc.io/docs/languages/cpp/quickstart/
+
+Deploy NVIDIA Riva server:
+   Refer to https://docs.nvidia.com/deeplearning/riva/user-guide/docs/quick-start-guide.html
+   to deploy the Riva server.
+
+Update the voice_name in the "riva_tts_stream" group as per the voice names supported by the Riva TTS service:
+   voice_name: <Voice name>
+
+--------------------------------------------------------------------------------
+How to test Text-To-Speech Plugin:
+   $ echo "Nvidia corporation is based in Santa Clara" | gst-launch-1.0 -v \
+   fdsrc ! "text/x-raw" ! nvds_text_to_speech config-file=/opt/nvidia/deepstream/deepstream/sources/apps/audio_apps/deepstream_asr_tts_app/riva_tts_conf.yml \
+   ! autoaudiosink
