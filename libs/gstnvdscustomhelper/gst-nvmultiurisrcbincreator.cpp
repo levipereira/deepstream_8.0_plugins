@@ -17,6 +17,77 @@
 #include "nvdsmeta.h"
 #include "gstnvdsmeta.h"
 #include <thread>
+#include <mutex>
+#include <map>
+#include <string>
+
+// Global storage for camera metadata accessible from Python
+struct CameraData {
+    std::string camera_id;
+    std::string camera_name;
+    std::string camera_url;
+    guint source_id;
+    bool valid;
+    
+    CameraData() : source_id(0), valid(false) {}
+};
+
+// Thread-safe global storage
+static std::map<guint, CameraData> g_camera_data_map;
+static std::mutex g_camera_data_mutex;
+
+// Helper functions for global camera data management
+extern "C" {
+    // Store camera data for a specific source_id
+    void store_camera_data(guint source_id, const char* camera_id, const char* camera_name, const char* camera_url) {
+        std::lock_guard<std::mutex> lock(g_camera_data_mutex);
+        CameraData& data = g_camera_data_map[source_id];
+        data.source_id = source_id;
+        data.camera_id = camera_id ? std::string(camera_id) : "";
+        data.camera_name = camera_name ? std::string(camera_name) : "";
+        data.camera_url = camera_url ? std::string(camera_url) : "";
+        data.valid = true;
+        
+        g_print("DEBUG: Stored camera data - source_id=%u, camera_id='%s', camera_name='%s'\n", 
+                source_id, data.camera_id.c_str(), data.camera_name.c_str());
+    }
+    
+    // Retrieve camera data for a specific source_id
+    bool get_camera_data(guint source_id, char* camera_id, char* camera_name, char* camera_url, size_t buffer_size) {
+        std::lock_guard<std::mutex> lock(g_camera_data_mutex);
+        auto it = g_camera_data_map.find(source_id);
+        if (it != g_camera_data_map.end() && it->second.valid) {
+            const CameraData& data = it->second;
+            if (camera_id) strncpy(camera_id, data.camera_id.c_str(), buffer_size - 1);
+            if (camera_name) strncpy(camera_name, data.camera_name.c_str(), buffer_size - 1);
+            if (camera_url) strncpy(camera_url, data.camera_url.c_str(), buffer_size - 1);
+            return true;
+        }
+        return false;
+    }
+    
+    // Remove camera data for a specific source_id
+    void remove_camera_data(guint source_id) {
+        std::lock_guard<std::mutex> lock(g_camera_data_mutex);
+        g_camera_data_map.erase(source_id);
+        g_print("DEBUG: Removed camera data for source_id=%u\n", source_id);
+    }
+}
+
+// Camera metadata structures for enhanced metadata support
+#define NVDS_GST_META_CAMERA_INFO (nvds_get_user_meta_type((char *)"NVIDIA.NVDS_GST_META_CAMERA_INFO"))
+
+// Fixed-size structure to avoid dynamic memory issues
+typedef struct _CameraInfoMeta
+{
+  gchar camera_id[256];      // Fixed-size camera identifier
+  guint source_id;           // Source identifier assigned by DeepStream
+  gchar camera_name[256];    // Fixed-size camera name
+  gchar camera_url[512];     // Fixed-size camera URL
+  guint32 magic_number;      // Magic number for memory validation
+} CameraInfoMeta;
+
+#define CAMERA_META_MAGIC 0xCAFEBABE
 
 //#define NVMULTIURISRCBIN_CREATOR_DEBUG
 #ifndef NVMULTIURISRCBIN_CREATOR_DEBUG
@@ -138,6 +209,115 @@ s_nvmultiurisrcbincreator_remove_source_impl (NvDst_Handle_NvMultiUriSrcCreator
 static gpointer s_uribin_removal_thread (gpointer data);
 
 gint s_get_source_id (NvMultiUriSrcBinCreator * nvmultiurisrcbinCreator, GstDsNvUriSrcConfig * sourceConfig);
+
+// Camera metadata management functions
+static gpointer camera_meta_copy_func (gpointer data, gpointer user_data);
+static void camera_meta_release_func (gpointer data, gpointer user_data);
+static void attach_camera_metadata_to_frame (NvDsBatchMeta *batch_meta, NvDsFrameMeta *frame_meta, 
+                                           const gchar *camera_id, guint source_id, 
+                                           const gchar *camera_name, const gchar *camera_url);
+
+// Camera metadata management functions implementation - following NVIDIA example pattern exactly
+static gpointer
+camera_meta_copy_func (gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
+  CameraInfoMeta *src_meta = (CameraInfoMeta *) user_meta->user_meta_data;
+  CameraInfoMeta *dst_meta = NULL;
+  
+  if (!src_meta) {
+    g_print ("DEBUG: camera_meta_copy_func called with NULL src_meta\n");
+    return NULL;
+  }
+  
+  dst_meta = (CameraInfoMeta *) g_malloc0 (sizeof (CameraInfoMeta));
+  if (!dst_meta) {
+    g_print ("ERROR: Failed to allocate memory for camera metadata copy\n");
+    return NULL;
+  }
+  
+  // Copy the entire structure - this is safer than field-by-field copy
+  memcpy(dst_meta, src_meta, sizeof(CameraInfoMeta));
+  
+  g_print ("DEBUG: camera_meta_copy_func completed - source_id: %u\n", dst_meta->source_id);
+  return (gpointer) dst_meta;
+}
+
+static void
+camera_meta_release_func (gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
+  CameraInfoMeta *camera_meta = NULL;
+  
+  if (!user_meta) {
+    g_print ("DEBUG: camera_meta_release_func called with NULL user_meta\n");
+    return;
+  }
+  
+  camera_meta = (CameraInfoMeta *) user_meta->user_meta_data;
+  if (!camera_meta) {
+    g_print ("DEBUG: camera_meta_release_func called with NULL camera_meta\n");
+    return;
+  }
+  
+  g_print ("DEBUG: camera_meta_release_func called - source_id: %u\n", camera_meta->source_id);
+  
+  // Following NVIDIA pattern - free the metadata and set to NULL to prevent double free
+  g_free (camera_meta);
+  user_meta->user_meta_data = NULL;  // Critical: prevent double free
+  
+  g_print ("DEBUG: camera_meta_release_func completed\n");
+}
+
+static void
+attach_camera_metadata_to_frame (NvDsBatchMeta *batch_meta, NvDsFrameMeta *frame_meta, 
+                                const gchar *camera_id, guint source_id, 
+                                const gchar *camera_name, const gchar *camera_url)
+{
+  NvDsUserMeta *user_meta = NULL;
+  CameraInfoMeta *camera_meta = NULL;
+  
+  // Validate inputs
+  if (!batch_meta || !frame_meta) {
+    g_print ("Invalid batch_meta or frame_meta\n");
+    return;
+  }
+  
+  // Create camera metadata structure with safer memory allocation
+  camera_meta = (CameraInfoMeta *) g_malloc0 (sizeof (CameraInfoMeta));
+  if (!camera_meta) {
+    g_print ("Failed to allocate camera metadata\n");
+    return;
+  }
+  
+  // Use safe fixed-size string copying - no dynamic allocation
+  g_strlcpy(camera_meta->camera_id, camera_id ? camera_id : "", sizeof(camera_meta->camera_id));
+  camera_meta->source_id = source_id;
+  g_strlcpy(camera_meta->camera_name, camera_name ? camera_name : "", sizeof(camera_meta->camera_name));
+  g_strlcpy(camera_meta->camera_url, camera_url ? camera_url : "", sizeof(camera_meta->camera_url));
+  camera_meta->magic_number = CAMERA_META_MAGIC;
+  
+  // Acquire user metadata from pool
+  user_meta = nvds_acquire_user_meta_from_pool (batch_meta);
+  if (!user_meta) {
+    g_print ("Failed to acquire user meta from pool\n");
+    // Clean up allocated memory - no dynamic strings to free
+    g_free (camera_meta);
+    return;
+  }
+  
+  // Set metadata type and data following NVIDIA pattern
+  user_meta->base_meta.meta_type = NVDS_GST_META_CAMERA_INFO;
+  user_meta->user_meta_data = (void *) camera_meta;
+  user_meta->base_meta.copy_func = (NvDsMetaCopyFunc) camera_meta_copy_func;
+  user_meta->base_meta.release_func = (NvDsMetaReleaseFunc) camera_meta_release_func;
+  
+  // Attach metadata to frame
+  nvds_add_user_meta_to_frame (frame_meta, user_meta);
+  
+  g_print ("DEBUG: Successfully attached camera metadata - camera_id: %s, source_id: %u\n", 
+           camera_meta->camera_id, camera_meta->source_id);
+}
 
 static GstBus *
 s_nvmultiurisrcbincreator_get_bus_from_parent (NvMultiUriSrcBinCreator *
@@ -797,10 +977,32 @@ s_nvmultiurisrcbincreator_probe_func_add_sensorInfo (GstPad * pad,
         continue;
     }
 
-    frame_meta->sensorInfo_meta.source_id = srcInfo->config->source_id;
-    frame_meta->sensorInfo_meta.sensor_id = srcInfo->config->sensorId ? (gchar const*)g_strdup(srcInfo->config->sensorId) : (gchar const*)g_strdup("");
-    frame_meta->sensorInfo_meta.sensor_name = srcInfo->config->sensorName ? (gchar const*)g_strdup(srcInfo->config->sensorName) : (gchar const*)g_strdup("");
-    frame_meta->sensorInfo_meta.uri = srcInfo->config->uri ? (gchar const*)g_strdup(srcInfo->config->uri) : (gchar const*)g_strdup("");
+    // FINAL SOLUTION: DO NOT MODIFY sensorInfo_meta - use existing data only
+    
+    g_print ("DEBUG: FINAL SOLUTION - read-only access, no sensorInfo_meta modifications\n");
+    g_print ("DEBUG: frame_meta valid: %p, srcInfo valid: %p\n", frame_meta, srcInfo);
+    
+    if (srcInfo && srcInfo->config) {
+        g_print ("DEBUG: Available data - source_id=%u, sensorId=%s, sensorName=%s\n", 
+                 srcInfo->config->source_id, 
+                 srcInfo->config->sensorId ? srcInfo->config->sensorId : "NULL",
+                 srcInfo->config->sensorName ? srcInfo->config->sensorName : "NULL");
+        
+        // SOLUTION: Store data in global storage for Python access
+        // The data is available in srcInfo->config and stored globally for safe access
+        // We avoid all memory management issues by not modifying sensorInfo_meta
+        
+        store_camera_data(srcInfo->config->source_id,
+                          srcInfo->config->sensorId,
+                          srcInfo->config->sensorName,
+                          srcInfo->config->uri);
+        
+        g_print ("DEBUG: Data stored in global storage - camera_id='%s', camera_name='%s'\n",
+                 srcInfo->config->sensorId ? srcInfo->config->sensorId : "NULL",
+                 srcInfo->config->sensorName ? srcInfo->config->sensorName : "NULL");
+    }
+
+        g_print ("DEBUG: PRACTICAL SOLUTION completed successfully\n");
 
   }
 

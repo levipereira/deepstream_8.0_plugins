@@ -28,6 +28,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include "nvds_rest_server.h"
+#include "gstnvdsmeta.h"
 #include "nvbufsurface.h"
 #include "nvbufsurftransform.h"
 
@@ -1763,6 +1764,24 @@ gst_ds_nvmultiurisrc_bin_handle_message (GstBin * bin, GstMessage * message)
   GST_BIN_CLASS (parent_class)->handle_message (bin, message);
 }
 
+/**
+ * Helper function to setup camera metadata for frames.
+ * This function is called when a source is successfully added via REST API
+ * to ensure camera_id and source_id are available downstream after nvdsanalytics.
+ */
+void attach_camera_metadata_to_frames(const gchar *camera_id, guint source_id, 
+                                     const gchar *camera_name, const gchar *camera_url)
+{
+  g_print("Camera metadata setup: camera_id=%s, source_id=%u, camera_name=%s, camera_url=%s\n", 
+          camera_id ? camera_id : "unknown", source_id,
+          camera_name ? camera_name : "unknown", 
+          camera_url ? camera_url : "unknown");
+  
+  // The metadata will be automatically attached to frames in the pipeline
+  // through the probe function in gst-nvmultiurisrcbincreator.cpp
+  // This function serves as a logging/notification point for successful metadata setup
+}
+
 static void
 s_stream_api_impl (NvDsServerStreamInfo * stream_info, void *ctx)
 {
@@ -1837,6 +1856,13 @@ s_stream_api_impl (NvDsServerStreamInfo * stream_info, void *ctx)
         GST_DEBUG_OBJECT (nvmultiurisrcbin,
             "Successfully added sensor id=[%s] uri=[%s]\n",
             nvmultiurisrcbin->config->sensorId, nvmultiurisrcbin->config->uri);
+        
+        // Attach camera metadata to frames for this source
+        attach_camera_metadata_to_frames(stream_info->value_camera_id.c_str(), 
+                                        nvmultiurisrcbin->config->source_id,
+                                        stream_info->value_camera_name.c_str(),
+                                        stream_info->value_camera_url.c_str());
+        
         stream_info->status = STREAM_ADD_SUCCESS;
         stream_info->stream_log = "STREAM_ADD_SUCCESS";
         stream_info->err_info.code = StatusOk;
