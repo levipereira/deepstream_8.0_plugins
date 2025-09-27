@@ -17,6 +17,31 @@
 #include "nvdsmeta.h"
 #include "gstnvdsmeta.h"
 #include <thread>
+#include <mutex>
+#include <map>
+#include <string>
+
+
+/**
+ * Camera metadata structures for enhanced metadata support in DeepStream nvmultiurisrcbin.
+ * This implementation provides camera identification downstream after nvdsanalytics plugin.
+ */
+#define NVDS_GST_META_CAMERA_INFO (nvds_get_user_meta_type((char *)"NVIDIA.NVDS_GST_META_CAMERA_INFO"))
+
+/**
+ * @brief Camera metadata structure for NvDsUserMeta attachment
+ * 
+ * This structure contains camera identification information that is attached
+ * to each frame as NvDsUserMeta and can be accessed in Python via official bindings.
+ * Fixed-size arrays are used for efficient memory management and ctypes compatibility.
+ */
+typedef struct _CameraInfoMeta
+{
+  gchar camera_id[64];       ///< Camera identifier from REST API
+  guint source_id;           ///< Source identifier assigned by DeepStream  
+  gchar camera_name[64];     ///< Camera name from REST API
+  gchar camera_url[128];     ///< Camera URL/URI from REST API
+} CameraInfoMeta;
 
 //#define NVMULTIURISRCBIN_CREATOR_DEBUG
 #ifndef NVMULTIURISRCBIN_CREATOR_DEBUG
@@ -138,6 +163,147 @@ s_nvmultiurisrcbincreator_remove_source_impl (NvDst_Handle_NvMultiUriSrcCreator
 static gpointer s_uribin_removal_thread (gpointer data);
 
 gint s_get_source_id (NvMultiUriSrcBinCreator * nvmultiurisrcbinCreator, GstDsNvUriSrcConfig * sourceConfig);
+
+/**
+ * @brief Camera metadata management functions following NVIDIA official patterns
+ * 
+ * These functions implement the standard NvDsUserMeta copy/release pattern
+ * as demonstrated in deepstream_user_metadata_app.c sample application.
+ */
+static gpointer camera_meta_copy_func (gpointer data, gpointer user_data);
+static void camera_meta_release_func (gpointer data, gpointer user_data);
+static void attach_camera_metadata_to_frame (NvDsBatchMeta *batch_meta, NvDsFrameMeta *frame_meta,
+                                           const gchar *camera_id, guint source_id,
+                                           const gchar *camera_name, const gchar *camera_url);
+
+/**
+ * @brief Copy function for CameraInfoMeta NvDsUserMeta
+ * 
+ * Implementation follows the official NVIDIA pattern from deepstream_user_metadata_app.c.
+ * This function is called by DeepStream framework when metadata needs to be copied
+ * between different pipeline elements.
+ * 
+ * @param data Pointer to NvDsUserMeta structure
+ * @param user_data User data (unused)
+ * @return Pointer to newly allocated CameraInfoMeta copy
+ */
+static gpointer
+camera_meta_copy_func (gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
+  CameraInfoMeta *src_meta = (CameraInfoMeta *) user_meta->user_meta_data;
+  CameraInfoMeta *dst_meta = NULL;
+
+  if (!src_meta) {
+    GST_DEBUG ("camera_meta_copy_func called with NULL src_meta");
+    return NULL;
+  }
+
+  /* Allocate new structure following NVIDIA pattern */
+  dst_meta = (CameraInfoMeta *) g_malloc0 (sizeof (CameraInfoMeta));
+  if (!dst_meta) {
+    GST_ERROR ("Failed to allocate memory for camera metadata copy");
+    return NULL;
+  }
+
+  /* Copy the entire structure safely using NVIDIA memcpy pattern */
+  memcpy(dst_meta, src_meta, sizeof(CameraInfoMeta));
+
+  GST_DEBUG ("camera_meta_copy_func completed - source_id: %u", dst_meta->source_id);
+  return (gpointer) dst_meta;
+}
+
+/**
+ * @brief Release function for CameraInfoMeta NvDsUserMeta
+ * 
+ * Implementation follows the official NVIDIA pattern from deepstream_user_metadata_app.c.
+ * This function is called by DeepStream framework when metadata needs to be freed.
+ * 
+ * @param data Pointer to NvDsUserMeta structure
+ * @param user_data User data (unused)
+ */
+static void
+camera_meta_release_func (gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
+
+  if (!user_meta) {
+    GST_DEBUG ("camera_meta_release_func called with NULL user_meta");
+    return;
+  }
+
+  /* NVIDIA official pattern from deepstream_user_metadata_app.c */
+  if (user_meta->user_meta_data) {
+    GST_DEBUG ("camera_meta_release_func releasing data - source_id: %u", 
+               ((CameraInfoMeta*)user_meta->user_meta_data)->source_id);
+    g_free (user_meta->user_meta_data);
+    user_meta->user_meta_data = NULL;  /* Critical: prevent double free */
+  }
+
+  GST_DEBUG ("camera_meta_release_func completed");
+}
+
+/**
+ * @brief Attach camera metadata to frame using NvDsUserMeta
+ * 
+ * Implementation follows the official NVIDIA pattern from deepstream_user_metadata_app.c.
+ * This function creates and attaches CameraInfoMeta to the frame metadata, making it
+ * available downstream after nvdsanalytics plugin.
+ * 
+ * @param batch_meta Pointer to NvDsBatchMeta
+ * @param frame_meta Pointer to NvDsFrameMeta
+ * @param camera_id Camera identifier from REST API
+ * @param source_id Source identifier assigned by DeepStream
+ * @param camera_name Camera name from REST API
+ * @param camera_url Camera URL/URI from REST API
+ */
+static void
+attach_camera_metadata_to_frame (NvDsBatchMeta *batch_meta, NvDsFrameMeta *frame_meta,
+                                const gchar *camera_id, guint source_id,
+                                const gchar *camera_name, const gchar *camera_url)
+{
+  NvDsUserMeta *user_meta = NULL;
+  CameraInfoMeta *camera_meta = NULL;
+  NvDsMetaType user_meta_type = NVDS_GST_META_CAMERA_INFO;
+
+  /* Validate inputs */
+  if (!batch_meta || !frame_meta) {
+    GST_ERROR ("Invalid batch_meta or frame_meta");
+    return;
+  }
+
+  /* Acquire NvDsUserMeta from pool - NVIDIA official pattern */
+  user_meta = nvds_acquire_user_meta_from_pool(batch_meta);
+  if (!user_meta) {
+    GST_ERROR ("Failed to acquire user meta from pool");
+    return;
+  }
+
+  /* Create camera metadata structure - following NVIDIA g_malloc0 pattern */
+  camera_meta = (CameraInfoMeta *) g_malloc0 (sizeof (CameraInfoMeta));
+  if (!camera_meta) {
+    GST_ERROR ("Failed to allocate camera metadata");
+    return;
+  }
+
+  /* Populate camera metadata with safe string copying */
+  g_strlcpy(camera_meta->camera_id, camera_id ? camera_id : "", sizeof(camera_meta->camera_id));
+  camera_meta->source_id = source_id;
+  g_strlcpy(camera_meta->camera_name, camera_name ? camera_name : "", sizeof(camera_meta->camera_name));
+  g_strlcpy(camera_meta->camera_url, camera_url ? camera_url : "", sizeof(camera_meta->camera_url));
+
+  /* Set NvDsUserMeta following NVIDIA official pattern */
+  user_meta->user_meta_data = (void *) camera_meta;
+  user_meta->base_meta.meta_type = user_meta_type;
+  user_meta->base_meta.copy_func = (NvDsMetaCopyFunc) camera_meta_copy_func;
+  user_meta->base_meta.release_func = (NvDsMetaReleaseFunc) camera_meta_release_func;
+
+  /* Add NvDsUserMeta to frame level */
+  nvds_add_user_meta_to_frame(frame_meta, user_meta);
+
+  GST_DEBUG ("Successfully attached camera metadata - camera_id: %s, source_id: %u",
+             camera_meta->camera_id, camera_meta->source_id);
+}
 
 static GstBus *
 s_nvmultiurisrcbincreator_get_bus_from_parent (NvMultiUriSrcBinCreator *
@@ -797,10 +963,24 @@ s_nvmultiurisrcbincreator_probe_func_add_sensorInfo (GstPad * pad,
         continue;
     }
 
-    frame_meta->sensorInfo_meta.source_id = srcInfo->config->source_id;
-    frame_meta->sensorInfo_meta.sensor_id = srcInfo->config->sensorId ? (gchar const*)g_strdup(srcInfo->config->sensorId) : (gchar const*)g_strdup("");
-    frame_meta->sensorInfo_meta.sensor_name = srcInfo->config->sensorName ? (gchar const*)g_strdup(srcInfo->config->sensorName) : (gchar const*)g_strdup("");
-    frame_meta->sensorInfo_meta.uri = srcInfo->config->uri ? (gchar const*)g_strdup(srcInfo->config->uri) : (gchar const*)g_strdup("");
+    /* Camera metadata attachment using NvDsUserMeta - NVIDIA official approach */
+    if (srcInfo && srcInfo->config) {
+        GST_LOG ("Attaching camera metadata - source_id=%u, camera_id=%s, camera_name=%s", 
+                 srcInfo->config->source_id, 
+                 srcInfo->config->sensorId ? srcInfo->config->sensorId : "NULL",
+                 srcInfo->config->sensorName ? srcInfo->config->sensorName : "NULL");
+        
+        /* Use official NVIDIA NvDsUserMeta approach for metadata attachment */
+        attach_camera_metadata_to_frame(batch_meta, frame_meta,
+                                        srcInfo->config->sensorId,     /* camera_id */
+                                        srcInfo->config->source_id,    /* source_id */
+                                        srcInfo->config->sensorName,   /* camera_name */
+                                        srcInfo->config->uri);         /* camera_url */
+        
+        GST_DEBUG ("Camera metadata attached successfully - camera_id='%s', camera_name='%s'",
+                   srcInfo->config->sensorId ? srcInfo->config->sensorId : "NULL",
+                   srcInfo->config->sensorName ? srcInfo->config->sensorName : "NULL");
+    }
 
   }
 
