@@ -12,7 +12,7 @@ This repository is organized with feature-specific branches, each containing tar
 
 ### Active Branches
 
-#### [`feature/cameraInfo-UserMeta-downstream-support`](https://github.com/levipereira/deepstream_8.0_plugins/tree/feature/camera-metadata-storage-global-ctypes)
+#### [`feature/cameraInfo-UserMeta-downstream-support`](https://github.com/levipereira/deepstream_8.0_plugins/tree/feature/cameraInfo-UserMeta-downstream-support)
 
 This branch contains the implementation of camera metadata attachment using `NvDsUserMeta` in the DeepStream `nvmultiurisrcbin` plugin. The implementation enables `camera_id` and `camera_name` to be available downstream after the `nvdsanalytics` plugin, following the official NVIDIA pattern from `deepstream_user_metadata_app.c`.
 
