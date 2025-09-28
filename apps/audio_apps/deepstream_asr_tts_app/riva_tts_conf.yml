@@ -1,0 +1,45 @@
+%YAML 1.2
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+################################################################################
+
+---
+name: riva_server
+detail:
+  server_uri: "localhost:50051"
+
+---
+name: riva_tts_stream
+detail:
+  language_code: en-US
+  voice_name: English-US.Female-1
+  # Currently only LINEAR_PCM encoding is supported at 22050 Hz
+  encoding: LINEAR_PCM
+
+---
+name: ds_riva_tts_plugin
+detail:
+  # Output modes: [0, 1]
+  # 0 : Default mode, output the audio as received from the server without
+  #     adding any silence periods when there is no input.
+  #     Suitable for non-live sinks like wavenc.
+  # 1 : Insert silence mode: Insert silence in the output when audio from
+  #     server is not available, useful for live outputs like pulsesink.
+  output_mode : 1
+  # Framing modes: [0, 1, 2]
+  # 0 : Default mode: use the chunk size as provided by Riva server.
+  # 1 : Split mode: Split the server response in to the configured frame size.
+  #     Last chunk of the response is not padded.
+  # 2 : Split with padding mode: Split the server response in to configured frame
+  #     size, pad last chunk with zeros if less than frame size.
+  framing_mode : 2
+  # Output frame size in number of samples
+  frame_size : 4410

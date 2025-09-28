@@ -1,0 +1,50 @@
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2018-2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+################################################################################
+
+[sensor0]
+enable=1
+type=Camera
+id=LOCATION_A_CAM1
+location=45.293701447;-75.8303914499;48.1557479338
+description=Aisle Camera
+coordinate=5.2;10.1;11.2
+
+[sensor1]
+enable=1
+type=Camera
+id=LOCATION_B_CAM1
+location=45.293701447;-75.8303914499;48.1557479338
+description=Aisle Camera
+coordinate=5.2;10.1;11.2
+
+[place0]
+enable=1
+id=0
+type=intersection/road
+name=LOCATION_A
+location=30.32;-40.55;100.0
+coordinate=1.0;2.0;3.0
+place-sub-field1=C_127_158
+place-sub-field2=Lane 1
+place-sub-field3=P1
+
+[place1]
+enable=1
+id=1
+type=intersection/road
+name=LOCATION_B
+location=30.32;-40.55;100.0
+coordinate=1.0;2.0;3.0
+place-sub-field1=C_127_158
+place-sub-field2=Lane 1
+place-sub-field3=P1
+

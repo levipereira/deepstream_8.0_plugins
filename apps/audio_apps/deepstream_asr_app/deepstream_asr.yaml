@@ -1,0 +1,41 @@
+%YAML 1.2
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+#
+# NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+# property and proprietary rights in and to this material, related
+# documentation and any modifications thereto. Any use, reproduction,
+# disclosure or distribution of this material and related documentation
+# without an express license agreement from NVIDIA CORPORATION or
+# its affiliates is strictly prohibited.
+################################################################################
+
+---
+# Configuration file for DeepStream ASR Sample Application
+
+# Configuration for source0
+source0 :
+  # uri: URI of the input stream
+  uri : "file://streams/1272-135031-0000.wav"
+
+# Configuration for sink0
+sink0 :
+  # enable_playback: Enable playback of decoded audio content.
+  # 0: Playback disabled (Default)
+  # 1: Playback enabled
+  enable_playback : 1
+
+  # asr_output_file_name: Name of the text file for writing asr output
+  asr_output_file_name : asr0.txt
+
+  # sync: Indicates how fast the audio stream is to be rendered.
+  # 0: As fast as possible (Default)
+  # 1: Synchronously
+  sync : 1
+
+# Configuration for source1
+# ...
+# Configuration for sink1
+# ...
+

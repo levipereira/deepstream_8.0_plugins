@@ -1,0 +1,171 @@
+*****************************************************************************
+* SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+*
+* NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+* property and proprietary rights in and to this material, related
+* documentation and any modifications thereto. Any use, reproduction,
+* disclosure or distribution of this material and related documentation
+* without an express license agreement from NVIDIA CORPORATION or
+* its affiliates is strictly prohibited.
+*****************************************************************************
+
+*****************************************************************************
+                     deepstream-asr-app
+                             README
+*****************************************************************************
+
+===============================================================================
+1. Prerequisites:
+===============================================================================
+
+A. DeepStream SDK v8.0 release or later.
+B. NVIDIA Riva SDK v1.5.0-beta release or later.
+C. Riva ASR service deployment:
+   The Riva ASR service should be started externally.
+   Please check this link for the steps to deploy the models using Riva
+   Quick start scripts:
+   https://docs.nvidia.com/deeplearning/riva/user-guide/docs/quick-start-guide.html#local-deployment-using-quick-start-scripts
+
+   a. Example steps to deploy Riva server with desired ASR model:
+      Download Riva Quick Start package :
+      $ ngc registry resource download-version nvidia/riva/riva_quickstart:1.5.0-beta
+      $ cd riva_quickstart_v1.5.0-beta
+
+      Update config.sh file for required ASR model e.g CitriNet-1024:
+      service_enabled_asr=true
+      service_enabled_nlp=false
+      service_enabled_tts=false
+
+      riva_model_loc="riva-asr-model-repo"
+
+      models_asr=(
+      "${riva_ngc_org}/${riva_ngc_team}/rmir_asr_citrinet_1024_asrset1p7_streaming:${riva_ngc_model_version}"
+      "${riva_ngc_org}/${riva_ngc_team}/rmir_nlp_punctuation_bert_base:${riva_ngc_model_version}"
+      )
+
+      Run the Riva initialization script:
+      $ bash riva_init.sh
+
+    c. [Optional] Deploying ASR models from NVIDIA TAO Toolkit using Riva (e.g. Jasper model):
+       Please refer https://docs.nvidia.com/deeplearning/riva/user-guide/docs/tutorials/asr-python-advanced-finetune-am-citrinet-tao-deployment.html
+       for the steps to deploy ASR models from TAO Toolkit.
+
+       Example steps:
+       Download jasper_asr_SET_1pt2_nr.riva file
+       $ wget https://api.ngc.nvidia.com/v2/models/nvidia/tao/speechtotext_english_jasper/versions/deployable_v1.2/files/jasper_asr_SET_1pt2_nr.riva
+
+       Copy the jasper_asr_SET_1pt2_nr.riva file to /var/lib/docker/volumes/riva-asr-model-repo/_data/
+       This needs root privilege. Use sudo su command
+       $ sudo su
+       $ cp <directory path of downloaded .riva file>/jasper_asr_SET_1pt2_nr.riva  /var/lib/docker/volumes/riva-asr-model-repo/_data/
+       $ exit
+
+       Make sure we are at riva_quickstart_v1.5.0-beta directory
+
+       Set below environment variables:
+       $ export RIVA_SM_CONTAINER="nvcr.io/nvidia/riva/riva-speech:1.5.0-beta-servicemaker"
+       $ export MODEL_LOC="riva-asr-model-repo"
+       $ export MODEL_NAME="jasper_asr_SET_1pt2_nr.riva"
+       $ export KEY="tlt_encode"
+
+       Build the docker image:
+       $ sudo docker pull $RIVA_SM_CONTAINER
+
+       Build Riva ASR model in streaming mode:
+       $ sudo docker run --rm --gpus 0 -v $MODEL_LOC:/data $RIVA_SM_CONTAINER riva-build speech_recognition /data/asr.rmir:$KEY /data/$MODEL_NAME:$KEY --decoder_type=greedy
+
+       Deploy Riva model in streaming mode:
+       $ sudo docker run --rm --gpus 0 -v $MODEL_LOC:/data $RIVA_SM_CONTAINER riva-deploy -f /data/asr.rmir:$KEY /data/models/
+
+       With above steps, Jasper models are downloaded at /var/lib/docker/volumes/riva-asr-model-repo/_data/models/
+
+    c. Deploy the Riva ASR service:
+       $ bash riva_start.sh
+
+       To stop ASR services after the application has run successfully, run the following command:
+       $ bash riva_stop.sh
+
+D. gRPC C++ shared libraries v1.54.3 installation is needed for using the Riva ASR gRPC service:
+   Please follow steps given at below link, and add -DBUILD_SHARED_LIBS=ON
+   to the cmake build options. (Recommend to use 'make -j4' instead of 'make -j')
+   https://grpc.io/docs/languages/cpp/quickstart/
+   Or Use the included script to install gRPC C++ libraries:
+      $ sudo chmod +x gRPC_installation.sh
+      $ ./gRPC_installation.sh
+   Note:
+   The gRPC C++ libraries are pre-installed on the DeepStream docker images.
+
+   Please run below command to add the installation path to the LD_LIBRARY_PATH
+   environment variable:
+   $ export LD_LIBRARY_PATH=$HOME/.local/lib:$LD_LIBRARY_PATH
+
+E. libyaml-cpp YAML parser C++ library:
+   $ sudo apt install libyaml-cpp-dev
+
+
+===============================================================================
+2. Purpose:
+===============================================================================
+
+This sample application demonstrates the Automatic Speech Recognition (ASR)
+functionality using the "nvdsasr" GStreamer plugin.
+
+===============================================================================
+3. To compile:
+===============================================================================
+
+  $ Set CUDA_VER in the MakeFile as per platform.
+     For x86, CUDA_VER=12.8
+     For jetson, CUDA_VER=13.0
+  $ sudo make (sudo not required in case of docker containers)
+
+NOTE: To compile the sources, run make with "sudo" or root permission.
+
+===============================================================================
+4. Usage:
+===============================================================================
+
+  Set LD_LIBRARY_PATH:
+  $ export LD_LIBRARY_PATH=$HOME/.local/lib:$LD_LIBRARY_PATH
+
+  Update the configuration file riva_asr_grpc_jasper_conf.yml with the desired
+  Riva server URI and the model name.
+
+  Run using YAML configuration file:
+  $ deepstream-asr-app -c deepstream_asr.yaml
+
+  OR
+
+  Run using GLib key file format configuration file:
+  $ deepstream-asr-app -c deepstream_asr.cfg
+
+  OR
+
+  If required, running using sudo:
+  $ sudo LD_LIBRARY_PATH=$LD_LIBRARY_PATH deepstream-asr-app -c deepstream_asr.yaml
+
+  User must have write permission in the directory to store the
+  generated output file.
+  Note: This application supports configuration file in the YAML format (.yaml)
+  and also the GLib key file format (.cfg). The support for .cfg files will be
+  deprecated in future versions.
+
+  Running the application inside docker:
+    $ export DISPLAY=:0
+    $ xhost +
+    $ sudo docker run --rm -it --gpus '"'device=0'"' -v riva-asr-model-repo:/data -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix --net=host $DS_Docker
+    where $DS_Docker is the name of DeepStream docker image.
+
+    Follow the steps at the start of this section to run the application.
+
+
+In this example application following operations are performed:
+1. Decoding of incoming speech data.
+2. Audio playback.
+   If audio playback is not needed, it can be
+   disabled by setting  "enable_playback" to 0  in the configuration file.
+   Refer to the provided sample configuration file: deepstream_asr.yaml
+3. Automatic Speech Recognition on the decoded audio.
+   ASR Output of every stream is stored in the output text file specified
+   by "asr_output_file_name" in the configuration file.
