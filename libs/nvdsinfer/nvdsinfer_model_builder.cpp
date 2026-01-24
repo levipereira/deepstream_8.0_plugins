@@ -12,6 +12,7 @@
 
 #include <dlfcn.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <array>
 #include <fstream>
 #include <iomanip>
@@ -24,6 +25,8 @@
 
 #include <NvInferPlugin.h>
 #include <NvOnnxParser.h>
+#include <NvInferVersion.h>
+#include <cuda_runtime_api.h>
 
 #include "nvdsinfer.h"
 #include "nvdsinfer_custom_impl.h"
@@ -32,6 +35,207 @@
 #include "nvdsinfer_utils.h"
 
 namespace nvdsinfer {
+
+/* ============================================================================
+ * Engine File Naming Helper Functions
+ * These functions generate standardized engine file names that include:
+ * - Model name, batch size, input dimensions
+ * - GPU compute capability (architecture-specific)
+ * - TensorRT version (version-specific)
+ * - Precision mode
+ * ============================================================================ */
+
+std::string getGpuComputeCapability(int gpuId)
+{
+    cudaDeviceProp prop;
+    cudaError_t err = cudaGetDeviceProperties(&prop, gpuId);
+    if (err != cudaSuccess)
+    {
+        dsInferWarning("Failed to get GPU properties for device %d: %s",
+            gpuId, cudaGetErrorString(err));
+        return "unknown";
+    }
+    
+    // Format: sm{major}{minor}, e.g., sm86 for compute capability 8.6
+    std::stringstream ss;
+    ss << "sm" << prop.major << prop.minor;
+    return ss.str();
+}
+
+std::string getGpuModelName(int gpuId)
+{
+    cudaDeviceProp prop;
+    cudaError_t err = cudaGetDeviceProperties(&prop, gpuId);
+    if (err != cudaSuccess)
+    {
+        dsInferWarning("Failed to get GPU properties for device %d: %s",
+            gpuId, cudaGetErrorString(err));
+        return "unknown";
+    }
+    
+    std::string gpuName = prop.name;
+    
+    // Remove common prefixes to get a shorter, cleaner name
+    const std::vector<std::string> prefixes = {
+        "NVIDIA GeForce ",
+        "NVIDIA GEFORCE ",
+        "GeForce ",
+        "GEFORCE ",
+        "NVIDIA ",
+        "Tesla ",
+        "TESLA ",
+        "Quadro ",
+        "QUADRO "
+    };
+    
+    for (const auto& prefix : prefixes)
+    {
+        if (gpuName.find(prefix) == 0)
+        {
+            gpuName = gpuName.substr(prefix.length());
+            break;
+        }
+    }
+    
+    // Sanitize the name: convert to lowercase, remove spaces and special characters
+    std::string sanitized;
+    sanitized.reserve(gpuName.length());
+    
+    for (char c : gpuName)
+    {
+        if (std::isalnum(c))
+        {
+            sanitized += std::tolower(c);
+        }
+        // Skip spaces, dashes, and other special characters
+    }
+    
+    // Handle some common cases for cleaner names
+    // e.g., "RTX 3090" becomes "rtx3090", "A100" becomes "a100"
+    
+    return sanitized.empty() ? "unknown" : sanitized;
+}
+
+std::string getTensorRTVersion()
+{
+    // Get TensorRT version from NvInferVersion.h
+    int major = NV_TENSORRT_MAJOR;
+    int minor = NV_TENSORRT_MINOR;
+    
+    std::stringstream ss;
+    ss << "trt" << major << "." << minor;
+    return ss.str();
+}
+
+/**
+ * Extract the base model name from a file path.
+ * Removes directory path and common model file extensions.
+ */
+static std::string extractModelBaseName(const std::string& modelPath)
+{
+    // Find the last directory separator
+    size_t lastSlash = modelPath.find_last_of("/\\");
+    std::string filename = (lastSlash != std::string::npos) 
+        ? modelPath.substr(lastSlash + 1) 
+        : modelPath;
+    
+    // Remove common model file extensions
+    const std::vector<std::string> extensions = {
+        ".onnx", ".ONNX",
+        ".uff", ".UFF", 
+        ".caffemodel", ".CAFFEMODEL",
+        ".prototxt", ".PROTOTXT",
+        ".etlt", ".ETLT",
+        ".engine", ".ENGINE"
+    };
+    
+    for (const auto& ext : extensions)
+    {
+        if (filename.length() > ext.length())
+        {
+            size_t pos = filename.rfind(ext);
+            if (pos != std::string::npos && pos == filename.length() - ext.length())
+            {
+                filename = filename.substr(0, pos);
+                break;
+            }
+        }
+    }
+    
+    return filename;
+}
+
+/**
+ * Extract the directory path from a file path.
+ */
+static std::string extractDirectory(const std::string& filePath)
+{
+    size_t lastSlash = filePath.find_last_of("/\\");
+    if (lastSlash != std::string::npos)
+    {
+        return filePath.substr(0, lastSlash + 1);
+    }
+    return "./";
+}
+
+std::string generateEngineFilePath(
+    const std::string& modelPath,
+    int batchSize,
+    int inputWidth,
+    int inputHeight,
+    int gpuId,
+    int dlaCore,
+    NvDsInferNetworkMode networkMode)
+{
+    std::stringstream ss;
+    
+    // Get directory and base model name
+    std::string directory = extractDirectory(modelPath);
+    std::string modelName = extractModelBaseName(modelPath);
+    
+    // Start with model name
+    ss << directory << modelName;
+    
+    // Add batch size
+    ss << "_b" << batchSize;
+    
+    // Add input dimensions if specified
+    if (inputWidth > 0 && inputHeight > 0)
+    {
+        ss << "_i" << inputWidth << "x" << inputHeight;
+    }
+    
+    // Add device identifier
+    // For GPU: include both compute capability AND model name for optimal engine matching
+    // This ensures engines are truly optimized for the specific GPU model
+    // e.g., RTX 3090 and RTX 3070 both have sm86 but different optimization profiles
+    if (dlaCore >= 0)
+    {
+        ss << "_dla" << dlaCore;
+    }
+    else
+    {
+        ss << "_" << getGpuComputeCapability(gpuId);
+        ss << "_" << getGpuModelName(gpuId);
+    }
+    
+    // Add TensorRT version
+    ss << "_" << getTensorRTVersion();
+    
+    // Add precision mode
+    ss << "_" << networkMode2Str(networkMode);
+    
+    // Add extension
+    ss << ".engine";
+    
+    return ss.str();
+}
+
+bool engineFileExists(const std::string& enginePath)
+{
+    struct stat buffer;
+    return (stat(enginePath.c_str(), &buffer) == 0);
+}
 
 /* Default data type for bound layers  - FP32 */
 constexpr nvinfer1::DataType kDefaultTensorDataType = nvinfer1::DataType::kFLOAT;
@@ -579,16 +783,27 @@ TrtModelBuilder::buildModel(const NvDsInferContextInitParams& initParams,
         networkMode = m_Options->networkMode;
     }
 
-    std::string devId = std::string("gpu") + std::to_string(m_GpuId);
-    if (initParams.useDLA && initParams.dlaCore >= 0)
-    {
-        devId = std::string("dla") + std::to_string(initParams.dlaCore);
-    }
+    int dlaCore = (initParams.useDLA && initParams.dlaCore >= 0) ? initParams.dlaCore : -1;
+    
+    // Get input dimensions from init params
+    int inputWidth = initParams.inferInputDims.w;
+    int inputHeight = initParams.inferInputDims.h;
 
-    /* Construct the suggested path for engine file. */
-    suggestedPathName =
-        modelPath + "_b" + std::to_string(initParams.maxBatchSize) + "_" +
-        devId + "_" + networkMode2Str(networkMode) + ".engine";
+    /* Construct the suggested path for engine file using standardized naming.
+     * Format: {model}_b{batch}_i{width}x{height}_{compute_cap}_{gpu_model}_{trt_version}_{precision}.engine
+     * Example: model_b8_i640x640_sm86_rtx3090_trt10.7_fp16.engine
+     */
+    suggestedPathName = generateEngineFilePath(
+        modelPath,
+        initParams.maxBatchSize,
+        inputWidth,
+        inputHeight,
+        m_GpuId,
+        dlaCore,
+        networkMode);
+    
+    dsInferInfo("Generated engine file path: %s", suggestedPathName.c_str());
+    
     return engine;
 }
 

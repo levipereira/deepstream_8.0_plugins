@@ -349,6 +349,71 @@ private:
         nvinfer1::ICudaEngine *& cudaEngine);
 };
 
+/**
+ * Helper functions for engine file naming with hardware/software versioning.
+ * This ensures engine files are properly identified by:
+ * - Model name and parameters (batch size, input dimensions)
+ * - GPU compute capability (architecture)
+ * - TensorRT version
+ * - Precision mode (fp32, fp16, int8, best)
+ */
+
+/**
+ * Get GPU compute capability string (e.g., "sm86" for compute capability 8.6)
+ * @param gpuId GPU device ID
+ * @return Compute capability string or empty string on failure
+ */
+std::string getGpuComputeCapability(int gpuId);
+
+/**
+ * Get GPU model name sanitized for use in filenames (e.g., "rtx3090", "a100")
+ * Removes spaces, special characters, and common prefixes like "NVIDIA GeForce"
+ * @param gpuId GPU device ID
+ * @return Sanitized GPU model name or "unknown" on failure
+ */
+std::string getGpuModelName(int gpuId);
+
+/**
+ * Get TensorRT version string (e.g., "trt10.7")
+ * @return TensorRT version string
+ */
+std::string getTensorRTVersion();
+
+/**
+ * Generate standardized engine file path with all identifying parameters.
+ * Format: {model}_b{batch}_i{width}x{height}_{compute_cap}_{gpu_model}_{trt_version}_{precision}.engine
+ * Example: model_b8_i640x640_sm86_rtx3090_trt10.7_fp16.engine
+ * 
+ * Including both compute capability AND GPU model name ensures:
+ * - Engines are truly optimized for the specific GPU (not just architecture)
+ * - RTX 3090 and RTX 3070 (both sm86) will have separate optimized engines
+ * - Different GPU models with same arch won't use suboptimal engines
+ * 
+ * @param modelPath Base model file path (used to extract model name and directory)
+ * @param batchSize Maximum batch size
+ * @param inputWidth Network input width (0 if not specified)
+ * @param inputHeight Network input height (0 if not specified)
+ * @param gpuId GPU device ID (used to get compute capability and model name)
+ * @param dlaCore DLA core ID (-1 if not using DLA)
+ * @param networkMode Network precision mode
+ * @return Standardized engine file path
+ */
+std::string generateEngineFilePath(
+    const std::string& modelPath,
+    int batchSize,
+    int inputWidth,
+    int inputHeight,
+    int gpuId,
+    int dlaCore,
+    NvDsInferNetworkMode networkMode);
+
+/**
+ * Check if an engine file exists at the standardized path.
+ * @param enginePath Path to check
+ * @return true if file exists and is accessible
+ */
+bool engineFileExists(const std::string& enginePath);
+
 } // end of namespace nvdsinfer
 
 #endif

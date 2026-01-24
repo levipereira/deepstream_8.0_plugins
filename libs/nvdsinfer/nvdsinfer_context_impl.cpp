@@ -2183,7 +2183,14 @@ NvDsInferContextImpl::buildModel(NvDsInferContextInitParams& initParams)
 
 /* Deserialize engine and create backend context for the model from the init
  * params (caffemodel & prototxt/uff/onnx/etlt&key/custom-parser, int8
- * calibration tables, etc) and return the backend */
+ * calibration tables, etc) and return the backend.
+ * 
+ * Engine file search order:
+ * 1. FIRST: Try to read from model-engine-file specified in config
+ * 2. SECOND: If not found, search for engine file with standardized naming pattern
+ *    Format: {model}_b{batch}_i{width}x{height}_{compute_cap}_{gpu_model}_{trt_version}_{precision}.engine
+ * 3. THIRD: Only if not found, generate new engine file
+ */
 
 std::unique_ptr<BackendContext>
 NvDsInferContextImpl::generateBackendContext(NvDsInferContextInitParams& initParams)
@@ -2194,35 +2201,115 @@ NvDsInferContextImpl::generateBackendContext(NvDsInferContextInitParams& initPar
 
     std::shared_ptr<TrtEngine> engine;
     std::unique_ptr<BackendContext> backend;
+    
+    /* ========================================================================
+     * STEP 1: Try to load engine from path specified in config file
+     * ======================================================================== */
     if (!string_empty(initParams.modelEngineFilePath))
     {
+        printInfo("Step 1: Trying to load engine from config path: %s",
+            safeStr(initParams.modelEngineFilePath));
+            
         if (!deserializeEngineAndBackend(
                 initParams.modelEngineFilePath, dla, engine, backend))
         {
             printWarning(
-                "deserialize backend context from engine from file :%s failed, "
-                "try rebuild",
+                "deserialize backend context from engine from file :%s failed",
                 safeStr(initParams.modelEngineFilePath));
+        }
+        else if (backend && checkBackendParams(*backend, initParams) == NVDSINFER_SUCCESS)
+        {
+            printInfo("Successfully loaded engine from config path: %s",
+                safeStr(initParams.modelEngineFilePath));
+            return backend;
+        }
+        else if (backend)
+        {
+            printWarning(
+                "deserialized backend context :%s failed to match config params",
+                safeStr(initParams.modelEngineFilePath));
+            backend.reset();
+            engine.reset();
+        }
+    }
+    
+    /* ========================================================================
+     * STEP 2: Try to find engine file with standardized naming pattern
+     * This allows reusing previously generated engines for the same configuration
+     * ======================================================================== */
+    std::string modelPath;
+    
+    // Determine the model path to use for generating standardized engine name
+    if (!string_empty(initParams.onnxFilePath))
+    {
+        modelPath = initParams.onnxFilePath;
+    }
+    else if (!string_empty(initParams.tltEncodedModelFilePath))
+    {
+        modelPath = initParams.tltEncodedModelFilePath;
+    }
+    else if (!string_empty(initParams.modelFilePath))
+    {
+        modelPath = initParams.modelFilePath;
+    }
+    
+    if (!modelPath.empty())
+    {
+        // Generate standardized engine file path
+        std::string standardizedEnginePath = generateEngineFilePath(
+            modelPath,
+            initParams.maxBatchSize,
+            initParams.inferInputDims.w,
+            initParams.inferInputDims.h,
+            m_GpuID,
+            dla,
+            initParams.networkMode);
+        
+        printInfo("Step 2: Looking for engine with standardized name: %s",
+            standardizedEnginePath.c_str());
+        
+        // Check if engine file exists at standardized path
+        if (engineFileExists(standardizedEnginePath))
+        {
+            printInfo("Found existing engine file: %s", standardizedEnginePath.c_str());
+            
+            if (deserializeEngineAndBackend(standardizedEnginePath, dla, engine, backend))
+            {
+                if (backend && checkBackendParams(*backend, initParams) == NVDSINFER_SUCCESS)
+                {
+                    printInfo("Successfully loaded engine from standardized path: %s",
+                        standardizedEnginePath.c_str());
+                    return backend;
+                }
+                else if (backend)
+                {
+                    printWarning(
+                        "Engine at standardized path %s failed to match config params, "
+                        "will rebuild",
+                        standardizedEnginePath.c_str());
+                    backend.reset();
+                    engine.reset();
+                }
+            }
+            else
+            {
+                printWarning(
+                    "Failed to deserialize engine from standardized path: %s, will rebuild",
+                    standardizedEnginePath.c_str());
+            }
+        }
+        else
+        {
+            printInfo("No existing engine found at standardized path: %s",
+                standardizedEnginePath.c_str());
         }
     }
 
-    if (backend &&
-        checkBackendParams(*backend, initParams) == NVDSINFER_SUCCESS)
-    {
-        printInfo("Use deserialized engine model: %s",
-            safeStr(initParams.modelEngineFilePath));
-        return backend;
-    }
-    else if (backend)
-    {
-        printWarning(
-            "deserialized backend context :%s failed to match config params, "
-            "trying rebuild",
-            safeStr(initParams.modelEngineFilePath));
-        backend.reset();
-        engine.reset();
-    }
-
+    /* ========================================================================
+     * STEP 3: Build new engine from model files
+     * ======================================================================== */
+    printInfo("Step 3: Building new engine from model files");
+    
     backend = buildModel(initParams);
     if (!backend)
     {
